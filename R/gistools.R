@@ -2,23 +2,23 @@
 
 #' Function which filters coordinates in a data frame based on whether they
 #' fall within a polygon
-#' @param df a data frame of occurrence records that contains lat and lon columns
+#' @param df a data frame of occurrence records that contains lat and decimal_longitude columns
 #' @param poly a shape files with polygons
 #' @param lat decimal latitude field from the data from
-#' @param lon decimal longitude field from the data from
+#' @param decimal_longitude decimal longitude field from the data from
 #' @param results_col a character string representing the column where you like the label to be stored that indicates selected points
 #' @param tag a character string with which to label selected points
 #' @param crs a projection system
 #' @return a data frame with records filtered based on falling inside the focal polygon
 #' @export
-tag_by_poly <- function(df, poly, lat = "lat", lon = "lon", crs, results_col = "results", tag){
+tag_by_poly <- function(df, poly, decimal_latitude = "decimal_latitude", decimal_longitude = "decimal_longitude", crs, results_col = "results", tag){
 
 
-    df_no_coords <- df %>% filter(is.na(lat) | is.na(lon))
-    df %<>% filter(!is.na(lat) | !is.na(lon))
+    df_no_coords <- df %>% filter(is.na(decimal_latitude) | is.na(decimal_longitude))
+    df %<>% filter(!is.na(decimal_latitude) | !is.na(decimal_longitude))
 
     # convert data frame to simple feature (sf) format
-    df_points <- df %>% sf::st_as_sf(coords = c(x = {{lon}}, y = {{lat}}), crs = crs)
+    df_points <- df %>% sf::st_as_sf(coords = c(x = {{decimal_longitude}}, y = {{decimal_latitude}}), crs = crs)
 
     # query which points are within polygon and record results in focal column
     # final lengths > 0 creates a TRUE/FALSE vector from the st_within output
@@ -37,10 +37,10 @@ tag_by_poly <- function(df, poly, lat = "lat", lon = "lon", crs, results_col = "
 
 
 #'function which geoencodes records based on date and time stamps with gpx files
-#' @param records a data frame of occurence records that contains lat and lon columns
+#' @param records a data frame of occurence records that contains decimal_latitude and decimal_longitude columns
 #' @param timeCoords a csv of coordinates with time stamps usually from gps unit
 #' @param timezone timezone in which to interpret the biological records for matching to timeCoords (which are in UTC)
-#' @return a dataframe with filled in lat lon values
+#' @return a dataframe with filled in decimal_latitude decimal_longitude values
 #' @export
 extract_coords <- function(records, timeCoords, timezone){
     # READ IN AND PROCESS MANUAL IMPORT FORM FOR MATCHING TO COORDINATE STAMPS
@@ -50,8 +50,8 @@ extract_coords <- function(records, timeCoords, timezone){
         stop('something is wrong with time stamp format')
     }
     records$date_time <- as.POSIXct(paste(records$date, records$time), format="%Y-%m-%d %H:%M")
-    records_GPS <- records %>% filter(!is.na(lat)) # filter out anything with lat/lon or Locality Code
-    records_noGPS <- records %>% filter(is.na(lat)) # filter out anything without lat/lon or Locality Code
+    records_GPS <- records %>% filter(!is.na(decimal_latitude)) # filter out anything with decimal_latitude/decimal_longitude or Locality Code
+    records_noGPS <- records %>% filter(is.na(decimal_latitude)) # filter out anything without decimal_latitude/decimal_longitude or Locality Code
     if(nrow(records_noGPS) < 1){
         cat(paste0("All records have coordinates already! This script is not needed!\n"))
     }
@@ -64,12 +64,12 @@ extract_coords <- function(records, timeCoords, timezone){
     # force time zone to UTC without letting R jack with the actual time
     records_time$date_time <- lubridate::force_tz(records_time$date_time, 'UTC')
     # select only columns needed for query
-    records_time_query <- records_time %>% select(lat, lon, date_time) %>% arrange(date_time)
-    # Change lat/lon to integer so data frames will combine
-    records_time_query$lat <- as.numeric(records_time_query$lat)
-    records_time_query$lon <- as.numeric(records_time_query$lon)
-    timeCoords$lat <- as.numeric(timeCoords$lat)
-    timeCoords$lon <- as.numeric(timeCoords$lon)
+    records_time_query <- records_time %>% select(decimal_latitude, decimal_longitude, date_time) %>% arrange(date_time)
+    # Change decimal_latitude/decimal_longitude to integer so data frames will combine
+    records_time_query$decimal_latitude <- as.numeric(records_time_query$decimal_latitude)
+    records_time_query$decimal_longitude <- as.numeric(records_time_query$decimal_longitude)
+    timeCoords$decimal_latitude <- as.numeric(timeCoords$decimal_latitude)
+    timeCoords$decimal_longitude <- as.numeric(timeCoords$decimal_longitude)
 
     # create a type for track points vs our records
     timeCoords$type <- "track point"
@@ -122,9 +122,9 @@ extract_coords <- function(records, timeCoords, timezone){
         # warn if collection records is too separated in time from closest track point
         counter = 0
         if(time_diff_abs < 15){
-            # Input correct lat and lon into records with date and time stamps if timestamp has a match in gps track within 15 min
-            records_time$lat[records_time$date_time == query_row$date_time] <- closest_row$lat
-            records_time$lon[records_time$date_time == query_row$date_time] <- closest_row$lon
+            # Input correct decimal_latitude and decimal_longitude into records with date and time stamps if timestamp has a match in gps track within 15 min
+            records_time$decimal_latitude[records_time$date_time == query_row$date_time] <- closest_row$decimal_latitude
+            records_time$decimal_longitude[records_time$date_time == query_row$date_time] <- closest_row$decimal_longitude
             # cat(paste0('Collection record at timestamp ', query_row$date_time, ' is ', round(time_diff, 1),
             #            ' minutes separated from the nearest GPS trackpoint\n'))
         } else{cat(paste0('WARNING: collection record at timestamp ', query_row$date_time, ' is ', round(time_diff, 0),
@@ -132,14 +132,14 @@ extract_coords <- function(records, timeCoords, timezone){
         }
     }
     # check if any new coordinates have effectively been assigned before continuing
-    if(any(!is.na(records_time$lat))){
+    if(any(!is.na(records_time$decimal_latitude))){
         # Put database back together
         rec_new <- bind_rows(records_GPS, records_time, records_notime)
         rec_new %<>% arrange(date, time)
         rec_new$date_time <- NULL
-        cat(paste0('\n', length(na.omit(rec_new$lat)) - length(na.omit(records$lat)),
+        cat(paste0('\n', length(na.omit(rec_new$decimal_latitude)) - length(na.omit(records$decimal_latitude)),
                    ' records were updated with coordinates based on gpx timestamps\n'))
-        cat(paste0("WARNING: ", sum(is.na(rec_new$lat)),
+        cat(paste0("WARNING: ", sum(is.na(rec_new$decimal_latitude)),
                    ' records are still missing coordinates\n'))
         return(rec_new)
     } else{
@@ -166,9 +166,9 @@ munge_gpx <- function(path){
         elevations <- as.numeric(xpathSApply(pfile, path = "//trkpt/ele", xmlValue))
         times <- XML::xpathSApply(pfile, path = "//trkpt/time", xmlValue)
         coords <- XML::xpathSApply(pfile, path = "//trkpt", xmlAttrs)
-        lats <- as.numeric(coords["lat",])
-        lons <- as.numeric(coords["lon",])
-        df <- data.frame(lat = lats, lon = lons, elevation_in_meters = elevations, date_time = times)
+        lats <- as.numeric(coords["decimal_latitude",])
+        lons <- as.numeric(coords["decimal_longitude",])
+        df <- data.frame(decimal_latitude = lats, decimal_longitude = lons, elevation_in_meters = elevations, date_time = times)
         rm(list=c("elevations", "lats", "lons", "pfile", "times", "coords"))
         return(df)
     }
@@ -187,32 +187,21 @@ munge_gpx <- function(path){
 
 
 #' Populate elevation using the geonames server based on
-#' lat and lon columns in a dataframe
+#' lat and decimal_longitude columns in a dataframe
 #' I obtained my username (which is 'roverso') from here to validate the elevation lookup request
 #' http://www.geonames.org/export/web-services.html
 #' @param df a database in SYMBIOTA format
-#' @return a dataframe with rounded lat lon values
+#' @return a dataframe with rounded decimal_latitude decimal_longitude values
 #' @export
 find_elevation <- function(df){
-    df_coords <- df %>% select(lat, lon)
-    df_coords$lat %<>% as.numeric()
-    df_coords$lon %<>% as.numeric()
-    df_coords %<>% rename(decimalLatitude = lat, decimalLongitude = lon)
+    df_coords <- df %>% select(decimal_latitude, decimal_longitude)
+    df_coords$decimal_latitude %<>% as.numeric()
+    df_coords$decimal_longitude %<>% as.numeric()
+    df_coords %<>% rename(decimalLatitude = decimal_latitude, decimalLongitude = decimal_longitude)
     elevation_query <- rgbif::elevation(df_coords, username = 'roverso')
     df$elevation_in_meters <- elevation_query$elevation_geonames %>% as.character()
     return(df)
 }
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -243,11 +232,11 @@ reverse_geocode <- function(df, shapefile, field_name, new_name) {
 
     # --- clean coordinate columns ---------------------------------------------
     # coerce to numeric safely; keep originals intact
-    lat <- suppressWarnings(as.numeric(df$decimal_latitude))
-    lon <- suppressWarnings(as.numeric(df$decimal_longitude))
+    decimal_latitude <- suppressWarnings(as.numeric(df$decimal_latitude))
+    decimal_longitude <- suppressWarnings(as.numeric(df$decimal_longitude))
 
     # rows with usable coords
-    has_coords <- !is.na(lat) & !is.na(lon)
+    has_coords <- !is.na(decimal_latitude) & !is.na(decimal_longitude)
     df_no_coords <- df[!has_coords, , drop = FALSE]
     df_coords    <- df[ has_coords, , drop = FALSE]
 
@@ -316,33 +305,27 @@ reverse_geocode <- function(df, shapefile, field_name, new_name) {
 
 
 
-
-
-
-
-
-
-#' Rounds lat lon values based on sensible precision and manage formats
+#' Rounds decimal_latitude decimal_longitude values based on sensible precision and manage formats
 #' based on accuracy information in an coordinate uncertainty field
 #' in meters
 #' @param df a database in SYMBIOTA format
-#' @return a dataframe with rounded lat lon values
+#' @return a dataframe with rounded decimal_latitude decimal_longitude values
 #' @export
 geography_coordinate_rounder <- function(df){
-    # Ensure Lat/Lon and coordinate_uncertainty are numeric
+    # Ensure decimal_latitude/decimal_longitude and coordinate_uncertainty are numeric
     df <- df %>%
         mutate(
-            lat = as.numeric(lat),
-            lon = as.numeric(lon),
+            decimal_latitude = as.numeric(decimal_latitude),
+            decimal_longitude = as.numeric(decimal_longitude),
             coordinate_uncertainty = as.numeric(coordinate_uncertainty)
         )
 
     # Separate rows based on the presence of numeric uncertainty
     df_valid <- df %>%
-        filter(!is.na(lat) & grepl("\\d", coordinate_uncertainty))
+        filter(!is.na(decimal_latitude) & grepl("\\d", coordinate_uncertainty))
 
     df_no_coords <- df %>%
-        filter(is.na(lat) | !grepl("\\d", coordinate_uncertainty))
+        filter(is.na(decimal_latitude) | !grepl("\\d", coordinate_uncertainty))
 
     # Determine the number of decimal places based on coordinate_uncertainty
     df_valid <- df_valid %>%
@@ -356,27 +339,27 @@ geography_coordinate_rounder <- function(df){
             )
         )
 
-    # Round lat/lon values and format them to preserve trailing zeros
+    # Round decimal_latitude/decimal_longitude values and format them to preserve trailing zeros
     df_valid <- df_valid %>%
         rowwise() %>%
         mutate(
-            lat = formatC(round(lat, roundNum), format = "f", digits = roundNum),
-            lon = formatC(round(lon, roundNum), format = "f", digits = roundNum)
+            decimal_latitude = formatC(round(decimal_latitude, roundNum), format = "f", digits = roundNum),
+            decimal_longitude = formatC(round(decimal_longitude, roundNum), format = "f", digits = roundNum)
         ) %>%
         ungroup()
 
-    # Convert lat/lon to character to ensure consistency
+    # Convert decimal_latitude/decimal_longitude to character to ensure consistency
     df_valid <- df_valid %>%
         mutate(
-            lat = as.character(lat),
-            lon = as.character(lon)
+            decimal_latitude = as.character(decimal_latitude),
+            decimal_longitude = as.character(decimal_longitude)
         )
 
-    # Ensure df_no_coords lat/lon are also characters
+    # Ensure df_no_coords decimal_latitude/decimal_longitude are also characters
     df_no_coords <- df_no_coords %>%
         mutate(
-            lat = as.character(lat),
-            lon = as.character(lon)
+            decimal_latitude = as.character(decimal_latitude),
+            decimal_longitude = as.character(decimal_longitude)
         )
 
     # Combine all parts of the data frame back together
@@ -394,16 +377,16 @@ geography_coordinate_rounder <- function(df){
 
 
 #' DEPRACATED
-#' Rounds lat lon values based on sensible precision and manage formats
+#' Rounds decimal_latitude decimal_longitude values based on sensible precision and manage formats
 #' based on accuracy information in an coordinate uncertainty field
 #' in meters
 #' @param df a database in SYMBIOTA format
-#' @return a dataframe with rounded lat lon values
+#' @return a dataframe with rounded decimal_latitude decimal_longitude values
 #' @export
 round_coords_cc <- function(df){
-    # Make sure Lat/Lon associated columns are numeric
-    df$lat <- as.numeric(df$lat)
-    df$lon <- as.numeric(df$lon)
+    # Make sure decimal_latitude/decimal_longitude associated columns are numeric
+    df$decimal_latitude <- as.numeric(df$decimal_latitude)
+    df$decimal_longitude <- as.numeric(df$decimal_longitude)
     df$coordinate_uncertainty <- as.numeric(df$coordinate_uncertainty)
 
     # Temporarily remove records with "NA" or no numbers in the coordinate_uncertainty field so they don't get processed
@@ -411,10 +394,10 @@ round_coords_cc <- function(df){
     dfNAUncertainty <- df[is.na(df$coordinate_uncertainty),]
     df <- df[grepl("\\d", df$coordinate_uncertainty, perl = TRUE),]
     # remove records without coords temporarily
-    dfNoCoords <- df %>% filter(is.na(lat))
-    dfCoords <- df %>% filter(!is.na(lat))
+    dfNoCoords <- df %>% filter(is.na(decimal_latitude))
+    dfCoords <- df %>% filter(!is.na(decimal_latitude))
 
-    # ROUND LAT/LON TO APPROPRIATE VALUES BASED ON ACCURACY
+    # ROUND decimal_latitude/decimal_longitude TO APPROPRIATE VALUES BASED ON ACCURACY
     dfCoords['roundNum'] <- NA
     dfCoords$roundNum[dfCoords$coordinate_uncertainty >= 1000] <- 2
     dfCoords$roundNum[dfCoords$coordinate_uncertainty >= 100 & dfCoords$coordinate_uncertainty < 1000] <- 3
@@ -422,30 +405,30 @@ round_coords_cc <- function(df){
     dfCoords$roundNum[dfCoords$coordinate_uncertainty < 10] <- 5
     dfCoords$roundNum <- as.numeric(dfCoords$roundNum)
 
-    # Overwrite rounded Lat/Lon results with original values
+    # Overwrite rounded decimal_latitude/decimal_longitude results with original values
     results <- NA
     for(i in 1:nrow(dfCoords)){
-        results[[i]] <- formatC(dfCoords$lat[i], dfCoords$roundNum[i], format = "f")
+        results[[i]] <- formatC(dfCoords$decimal_latitude[i], dfCoords$roundNum[i], format = "f")
     }
-    dfCoords$lat <- results
+    dfCoords$decimal_latitude <- results
 
     results <- NA
     for(i in 1:nrow(dfCoords)){
-        results[[i]] <- formatC(dfCoords$lon[i], dfCoords$roundNum[i], format = "f")
+        results[[i]] <- formatC(dfCoords$decimal_longitude[i], dfCoords$roundNum[i], format = "f")
     }
-    dfCoords$lon <- results
+    dfCoords$decimal_longitude <- results
 
     # Delete columns that aren't needed
     dfCoords$roundNum <- NULL
-    dfCoords$lat <- as.numeric(dfCoords$lat)
-    dfCoords$lon <- as.numeric(dfCoords$lon)
+    dfCoords$decimal_latitude <- as.numeric(dfCoords$decimal_latitude)
+    dfCoords$decimal_longitude <- as.numeric(dfCoords$decimal_longitude)
 
     # Add back records that were removed pre-processing above and then re-sort database
     df <- bind_rows(dfCoords, dfNoCoords, dfNAUncertainty, dfnoNumUncertainty)
 
-    # Format as character values so no funny business happens to Lat/Lon
-    df$lat <- as.character(df$lat)
-    df$lon <- as.character(df$lon)
+    # Format as character values so no funny business happens to decimal_latitude/decimal_longitude
+    df$decimal_latitude <- as.character(df$decimal_latitude)
+    df$decimal_longitude <- as.character(df$decimal_longitude)
 
     # Sort whatever column is necessary before returning output since I cut and pasted the df so much
     if("SpecimenCode" %in% colnames(df)){
@@ -473,7 +456,7 @@ round_coords_cc <- function(df){
 #' @param max_gap_mins Maximum gap in minutes between record and nearest GPX point (default: 15)
 #' @param elevation_col Name of the elevation column to write in `records` (default: "elevation_in_meters")
 #' @param gps_elevation_col Name of the elevation column in the GPX data (default: "elevation_in_meters")
-#' @param overwrite_latlon_only_if_na If TRUE, only fill lat/lon when NA; else overwrite on match (default: FALSE)
+#' @param overwrite_latlon_only_if_na If TRUE, only fill decimal_latitude/lon when NA; else overwrite on match (default: FALSE)
 #' @param overwrite_elev_only_if_na   If TRUE, only fill elevation when NA; else overwrite on match (default: FALSE)
 #' @param verbose Print progress messages (default: TRUE)
 #' @return `records` with updated decimal_latitude, decimal_longitude, and (optionally) `elevation_col`.
@@ -508,7 +491,7 @@ extract_coordinates <- function(
   col_classes <- purrr::map_chr(records, ~ class(.x)[1])
   orig_cols   <- names(records)
 
-  # Coerce lat/lon to numeric safely (if present as character)
+  # Coerce decimal_latitude/decimal_longitude to numeric safely (if present as character)
   records$decimal_latitude  <- as.numeric_safe(records$decimal_latitude)
   records$decimal_longitude <- as.numeric_safe(records$decimal_longitude)
 
@@ -656,8 +639,8 @@ update_from_matches <- function(records_with_time, matched, within_gap, elevatio
   if (length(idx) == 0) return(records_with_time)
 
   # Map the matched vectors to the TRUEs in within_gap
-  lat_new  <- matched$gpx_lat [within_gap]
-  lon_new  <- matched$gpx_lon [within_gap]
+  lat_new  <- matched$gpx_lat[within_gap]
+  lon_new  <- matched$gpx_lon[within_gap]
   elev_new <- matched$gpx_elev[within_gap]
   gap_new  <- matched$time_diff_mins[within_gap]
 
