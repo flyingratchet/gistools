@@ -7,9 +7,9 @@
 detect_timezone(lat, lon)
 }
 \arguments{
-\item{lat}{Vector of latitudes}
-
 \item{lon}{Vector of longitudes}
+
+\item{decimal_latitude}{Vector of latitudes}
 }
 \value{
 Timezone string

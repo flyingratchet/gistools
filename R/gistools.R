@@ -36,40 +36,117 @@ tag_by_poly <- function(df, poly, decimal_latitude = "decimal_latitude", decimal
 
 
 
-
-
-
-
-
-#' Reads in gpx files recursively from a designated path and assembles and formats one
-#' exhaustive data frame with just location and time stamps sorted by time
-#' @param path a path to parent folder where gpx files occur
-#' @return a data frame of coords and time stamps for all gpx files specified
+#' Build a unified, time-sorted tibble of GPX trackpoints
+#'
+#' Recursively finds all .gpx files under `path`, parses `<trkpt>` nodes,
+#' and returns a tibble of latitude, longitude, optional elevation, and timestamps.
+#' Namespace-safe (uses local-name()) and robust to empty/bad files.
+#'
+#' @param path Character. Parent folder containing GPX files.
+#' @param glob File pattern. Default `"*.gpx"`.
+#' @param lat_attr Attribute name for latitude on `<trkpt>`. Default `"lat"`.
+#' @param lon_attr Attribute name for longitude on `<trkpt>`. Default `"lon"`.
+#' @param ele_node Child node name (local-name) for elevation. Default `"ele"`.
+#' @param time_node Child node name (local-name) for time. Default `"time"`.
+#' @param out_lat,out_lon,out_ele,out_time Output column names.
+#' @param tz Timezone for parsed times. Default `"UTC"`.
+#' @param quiet Suppress non-fatal parse warnings. Default `TRUE`.
+#' @param latlon_digits Integer digits to round lat/lon to. Set `NULL` to skip rounding. Default `6`.
+#' @param as_character Logical: if `TRUE`, output lat/lon as fixed-width strings with trailing zeros
+#'   (using `latlon_digits`). Default `FALSE`.
+#' @return A tibble with columns named per `out_*`. Elevation may be `NA`.
 #' @export
-munge_gpx <- function(path){
-    # grab all gpx files recursively from the specified parent folder
-    gpx.files <- list.files(path = path, pattern = "\\.gpx$", recursive = T, full.names=TRUE)
+build_coordinate_table <- function(
+    path,
+    glob            = "*.gpx",
+    lat_attr        = "lat",
+    lon_attr        = "lon",
+    ele_node        = "ele",
+    time_node       = "time",
+    out_lat         = "decimal_latitude",
+    out_lon         = "decimal_longitude",
+    out_ele         = "elevation_in_meters",
+    out_time        = "date_time",
+    tz              = "UTC",
+    quiet           = TRUE,
+    latlon_digits   = 6,
+    as_character    = FALSE
+) {
+  requireNamespace("fs", quietly = TRUE)
+  requireNamespace("xml2", quietly = TRUE)
+  requireNamespace("purrr", quietly = TRUE)
+  requireNamespace("tibble", quietly = TRUE)
+  requireNamespace("dplyr", quietly = TRUE)
+  requireNamespace("rlang", quietly = TRUE)
+  requireNamespace("lubridate", quietly = TRUE)
 
-    # run lapply to read in all gpx files and htmlTreeParse to pull out timestamp info and generate a list of individual dataframes
-    # corresponding to each gpx file.
-    ldf <- lapply(gpx.files, function(file){
-        pfile <- XML::htmlTreeParse(file = file, error = function(...) {}, useInternalNodes = T)
-        elevations <- as.numeric(xpathSApply(pfile, path = "//trkpt/ele", xmlValue))
-        times <- XML::xpathSApply(pfile, path = "//trkpt/time", xmlValue)
-        coords <- XML::xpathSApply(pfile, path = "//trkpt", xmlAttrs)
-        lats <- as.numeric(coords["decimal_latitude",])
-        lons <- as.numeric(coords["decimal_longitude",])
-        df <- data.frame(decimal_latitude = lats, decimal_longitude = lons, elevation_in_meters = elevations, date_time = times)
-        rm(list=c("elevations", "lats", "lons", "pfile", "times", "coords"))
-        return(df)
+  files <- fs::dir_ls(path, recurse = TRUE, glob = glob)
+
+  empty_out <- tibble::tibble(
+    !!out_lat  := vector("double"),
+    !!out_lon  := vector("double"),
+    !!out_ele  := vector("double"),
+    !!out_time := as.POSIXct(character())
+  )
+  if (length(files) == 0L) return(empty_out)
+
+  parse_one_file <- function(f) {
+    doc <- tryCatch(xml2::read_xml(f), error = function(e) NULL)
+    if (is.null(doc)) {
+      return(tibble::tibble(.lat = numeric(), .lon = numeric(), .ele = numeric(), .time = character()))
     }
+
+    pts <- xml2::xml_find_all(doc, ".//*[local-name()='trkpt']")
+    if (length(pts) == 0L) {
+      return(tibble::tibble(.lat = numeric(), .lon = numeric(), .ele = numeric(), .time = character()))
+    }
+
+    get_child_text <- function(nodeset, child_local) {
+      xml2::xml_text(xml2::xml_find_first(nodeset, paste0("./*[local-name()='", child_local, "']")))
+    }
+
+    tibble::tibble(
+      .lat  = suppressWarnings(as.numeric(xml2::xml_attr(pts, lat_attr))),
+      .lon  = suppressWarnings(as.numeric(xml2::xml_attr(pts, lon_attr))),
+      .ele  = suppressWarnings(as.numeric(get_child_text(pts, ele_node))),
+      .time = get_child_text(pts, time_node)
     )
-    # combine all dataframes to one big master coordinate dataframe of all gpx trails
-    all_coords <- data.table::rbindlist(ldf) # I used this rather than a dplyr solution because it's faster
-    all_coords$date_time %<>% lubridate::ymd_hms() # fix date formatting
-    all_coords %<>% dplyr::arrange(date_time)
-    return(all_coords)
+  }
+
+  if (quiet) {
+    old <- getOption("warn"); on.exit(options(warn = old), add = TRUE); options(warn = -1)
+  }
+
+  dat <- files %>%
+    purrr::map(parse_one_file) %>%
+    purrr::compact() %>%
+    dplyr::bind_rows()
+
+  needed <- c(".lat", ".lon", ".ele", ".time")
+  if (nrow(dat) == 0L || !all(needed %in% names(dat))) return(empty_out)
+
+  dat %>%
+    dplyr::mutate(
+      .time = lubridate::ymd_hms(.time, quiet = TRUE, tz = tz),
+      .ele  = round(.ele),
+      .lat  = if (!is.null(latlon_digits)) round(.lat, latlon_digits) else .lat,
+      .lon  = if (!is.null(latlon_digits)) round(.lon, latlon_digits) else .lon
+    ) %>%
+    dplyr::mutate(
+      .lat = if (as_character && !is.null(latlon_digits))
+        sprintf(paste0("%.", latlon_digits, "f"), .lat) else .lat,
+      .lon = if (as_character && !is.null(latlon_digits))
+        sprintf(paste0("%.", latlon_digits, "f"), .lon) else .lon
+    ) %>%
+    dplyr::rename(
+      !!out_lat  := .lat,
+      !!out_lon  := .lon,
+      !!out_ele  := .ele,
+      !!out_time := .time
+    ) %>%
+    dplyr::arrange(!!rlang::sym(out_time))
 }
+
 
 
 
@@ -336,8 +413,6 @@ round_coords_cc <- function(df){
 
 
 
-# REFACTORED COORDINATE EXTRACTION FROM TIME STAMP PIPELINE ---------------
-
 #' Geoencode records with GPX using per-record UTC offsets
 #'
 #' @param records Data frame with event_date, event_time, decimal_latitude, decimal_longitude, and timezone columns
@@ -353,6 +428,10 @@ round_coords_cc <- function(df){
 #' @return `records` with updated decimal_latitude, decimal_longitude, and (optionally) `elevation_col`.
 #'         Adds a helper column `time_diff_mins` indicating match gap (mins).
 #' @export
+#'
+#' @importFrom data.table as.data.table setkey
+#' @importFrom data.table .I .N
+#' @importFrom data.table `:=`
 extract_coordinates <- function(
     records,
     time_coords,
@@ -452,11 +531,14 @@ extract_coordinates <- function(
 }
 
 
-
+#' @noRd
+#' @keywords internal
 as.numeric_safe <- function(x) {
   suppressWarnings(as.numeric(ifelse(is.na(x) | x == "", NA, x)))
 }
 
+#' @noRd
+#' @keywords internal
 create_local_datetime <- function(date_col, time_col) {
   datetime_str <- paste(date_col, time_col)
   # Try with seconds (YYYY-mm-dd HH:MM:SS)
@@ -469,16 +551,8 @@ create_local_datetime <- function(date_col, time_col) {
   local_dt
 }
 
-
-
-
-
-#' Parse timezone offset strings in strict "UTC±N" format only
-#'
-#' @param x Character vector of timezone offsets in format "UTC-7", "UTC+5", etc.
-#' @return Data frame with input, offset_hours, and ok columns
-#' @examples
-#' check_time_zone_strings(c("UTC-7", "UTC+5", "UTC+0", "invalid", "GMT-7"))
+#' @noRd
+#' @keywords internal
 check_time_zone_strings <- function(x) {
   x_char <- as.character(x)
 
@@ -505,12 +579,8 @@ check_time_zone_strings <- function(x) {
   )
 }
 
-
-
-
-
-
-
+#' @noRd
+#' @keywords internal
 load_gps_data <- function(time_coords, gps_elevation_col = "elevation_in_meters") {
   if (is.character(time_coords) && file.exists(time_coords)) {
     time_coords <- read.csv(time_coords, stringsAsFactors = FALSE)
@@ -540,6 +610,8 @@ load_gps_data <- function(time_coords, gps_elevation_col = "elevation_in_meters"
   gps_dt
 }
 
+#' @noRd
+#' @keywords internal
 parse_utc_datetime <- function(datetime_col) {
   if (inherits(datetime_col, "POSIXct")) return(lubridate::with_tz(datetime_col, "UTC"))
   parsed <- lubridate::ymd_hms(as.character(datetime_col), tz = "UTC", quiet = TRUE)
@@ -550,6 +622,8 @@ parse_utc_datetime <- function(datetime_col) {
   parsed
 }
 
+#' @noRd
+#' @keywords internal
 update_from_matches <- function(records_with_time, matched, within_gap, elevation_col,
                                 overwrite_latlon_only_if_na = FALSE,
                                 overwrite_elev_only_if_na   = FALSE) {
@@ -597,7 +671,8 @@ update_from_matches <- function(records_with_time, matched, within_gap, elevatio
   records_with_time$time_diff_mins[idx] <- gap_new
   records_with_time
 }
-
+#' @noRd
+#' @keywords internal
 recoerce_columns <- function(df, ref_classes) {
   for (col in intersect(names(df), names(ref_classes))) {
     df[[col]] <- switch(
@@ -732,7 +807,7 @@ find_gpx_files <- function(folder) {
 
 #' Extract and process trackpoint data from GPX file
 #' @param gpx_file Path to GPX file
-#' @return List with lat, lon, time_utc, time_local, local_tz
+#' @return List with decimal_latitude, lon, time_utc, time_local, local_tz
 extract_trackpoint_data <- function(gpx_file) {
     xml <- read_xml(gpx_file)
     xml_clean <- xml_ns_strip(xml)
@@ -744,29 +819,29 @@ extract_trackpoint_data <- function(gpx_file) {
     }
 
     # Extract coordinates and time
-    lat <- xml_attr(trkpts, "lat")
+    decimal_latitude <- xml_attr(trkpts, "decimal_latitude")
     lon <- xml_attr(trkpts, "lon")
     time_raw <- map_chr(trkpts, ~ xml_text(xml_find_first(.x, "time")))
     time_parsed <- suppressWarnings(as.POSIXct(time_raw, format = "%Y-%m-%dT%H:%M:%OSZ", tz = "UTC"))
 
     # Filter valid data
-    valid_idx <- which(!is.na(lat) & !is.na(lon) & !is.na(time_parsed))
+    valid_idx <- which(!is.na(decimal_latitude) & !is.na(lon) & !is.na(time_parsed))
     if (length(valid_idx) == 0) {
         message("⚠️ No valid data in: ", gpx_file)
         return(NULL)
     }
 
-    lat <- lat[valid_idx]
+    decimal_latitude <- decimal_latitude[valid_idx]
     lon <- lon[valid_idx]
     time_utc <- time_parsed[valid_idx]
 
     # Detect and convert to local timezone
-    local_tz <- detect_timezone(lat, lon)
+    local_tz <- detect_timezone(decimal_latitude, lon)
     time_local <- as.POSIXct(time_utc, tz = "UTC")
     attr(time_local, "tzone") <- local_tz
 
     list(
-        lat = lat,
+        decimal_latitude = decimal_latitude,
         lon = lon,
         time_utc = time_utc,
         time_local = time_local,
@@ -775,7 +850,7 @@ extract_trackpoint_data <- function(gpx_file) {
 }
 
 #' Detect timezone from GPS coordinates
-#' @param lat Vector of latitudes
+#' @param decimal_latitude Vector of latitudes
 #' @param lon Vector of longitudes
 #' @return Timezone string
 detect_timezone <- function(lat, lon) {

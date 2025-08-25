@@ -10,7 +10,7 @@ extract_trackpoint_data(gpx_file)
 \item{gpx_file}{Path to GPX file}
 }
 \value{
-List with lat, lon, time_utc, time_local, local_tz
+List with decimal_latitude, lon, time_utc, time_local, local_tz
 }
 \description{
 Extract and process trackpoint data from GPX file
