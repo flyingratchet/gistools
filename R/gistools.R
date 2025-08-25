@@ -36,6 +36,7 @@ tag_by_poly <- function(df, poly, decimal_latitude = "decimal_latitude", decimal
 
 
 
+
 #'function which geoencodes records based on date and time stamps with gpx files
 #' @param records a data frame of occurence records that contains decimal_latitude and decimal_longitude columns
 #' @param timeCoords a csv of coordinates with time stamps usually from gps unit
@@ -578,18 +579,47 @@ create_local_datetime <- function(date_col, time_col) {
   local_dt
 }
 
+
+
+
+
+#' Parse timezone offset strings in strict "UTC±N" format only
+#'
+#' @param x Character vector of timezone offsets in format "UTC-7", "UTC+5", etc.
+#' @return Data frame with input, offset_hours, and ok columns
+#' @examples
+#' check_time_zone_strings(c("UTC-7", "UTC+5", "UTC+0", "invalid", "GMT-7"))
 check_time_zone_strings <- function(x) {
-  # Accepts "UTC±N" or "UTC±N.N" (e.g., "UTC-7", "UTC+5.5")
-  pat <- "^UTC([+-])(\\d+(?:\\.\\d+)?)$"
-  ok  <- grepl(pat, x)
-  offsets <- rep(NA_real_, length(x))
-  if (any(ok)) {
-    sign <- ifelse(sub(pat, "\\1", x[ok]) == "+", 1, -1)
-    hrs  <- as.numeric(sub(pat, "\\2", x[ok]))
-    offsets[ok] <- sign * hrs
+  x_char <- as.character(x)
+
+  # Match exactly "UTC" followed by +/- and digits (with optional decimals)
+  pattern <- "^UTC([+-])(\\d+(?:\\.\\d+)?)$"
+  matches <- regexec(pattern, x_char, ignore.case = TRUE)
+
+  offset_hours <- rep(NA_real_, length(x_char))
+
+  for (i in seq_along(matches)) {
+    match_data <- regmatches(x_char[i], matches[i])[[1]]
+    if (length(match_data) == 3) {  # Full match + 2 capture groups
+      sign <- ifelse(match_data[2] == "-", -1, 1)
+      hours <- as.numeric(match_data[3])
+      offset_hours[i] <- sign * hours
+    }
   }
-  list(ok = ok, offset_hours = offsets)
+
+  data.frame(
+    input = x_char,
+    offset_hours = offset_hours,
+    ok = !is.na(offset_hours),
+    stringsAsFactors = FALSE
+  )
 }
+
+
+
+
+
+
 
 load_gps_data <- function(time_coords, gps_elevation_col = "elevation_in_meters") {
   if (is.character(time_coords) && file.exists(time_coords)) {
@@ -701,10 +731,35 @@ recoerce_columns <- function(df, ref_classes) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # NEW REFACTORED GPX AND KML PIPELINE -------------------------------------
-
-
-
 
 #' Convert GPX Files to KML with Labeled Points and Trails (Auto-Timezone Detection)
 #'

@@ -3,7 +3,7 @@
 \name{find_elevation}
 \alias{find_elevation}
 \title{Populate elevation using the geonames server based on
-lat and lon columns in a dataframe
+lat and decimal_longitude columns in a dataframe
 I obtained my username (which is 'roverso') from here to validate the elevation lookup request
 http://www.geonames.org/export/web-services.html}
 \usage{
@@ -13,11 +13,11 @@ find_elevation(df)
 \item{df}{a database in SYMBIOTA format}
 }
 \value{
-a dataframe with rounded lat lon values
+a dataframe with rounded decimal_latitude decimal_longitude values
 }
 \description{
 Populate elevation using the geonames server based on
-lat and lon columns in a dataframe
+lat and decimal_longitude columns in a dataframe
 I obtained my username (which is 'roverso') from here to validate the elevation lookup request
 http://www.geonames.org/export/web-services.html
 }

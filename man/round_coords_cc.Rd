@@ -3,7 +3,7 @@
 \name{round_coords_cc}
 \alias{round_coords_cc}
 \title{DEPRACATED
-Rounds lat lon values based on sensible precision and manage formats
+Rounds decimal_latitude decimal_longitude values based on sensible precision and manage formats
 based on accuracy information in an coordinate uncertainty field
 in meters}
 \usage{
@@ -13,11 +13,11 @@ round_coords_cc(df)
 \item{df}{a database in SYMBIOTA format}
 }
 \value{
-a dataframe with rounded lat lon values
+a dataframe with rounded decimal_latitude decimal_longitude values
 }
 \description{
 DEPRACATED
-Rounds lat lon values based on sensible precision and manage formats
+Rounds decimal_latitude decimal_longitude values based on sensible precision and manage formats
 based on accuracy information in an coordinate uncertainty field
 in meters
 }

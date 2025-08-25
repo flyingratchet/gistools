@@ -7,14 +7,14 @@
 extract_coords(records, timeCoords, timezone)
 }
 \arguments{
-\item{records}{a data frame of occurence records that contains lat and lon columns}
+\item{records}{a data frame of occurence records that contains decimal_latitude and decimal_longitude columns}
 
 \item{timeCoords}{a csv of coordinates with time stamps usually from gps unit}
 
 \item{timezone}{timezone in which to interpret the biological records for matching to timeCoords (which are in UTC)}
 }
 \value{
-a dataframe with filled in lat lon values
+a dataframe with filled in decimal_latitude decimal_longitude values
 }
 \description{
 function which geoencodes records based on date and time stamps with gpx files

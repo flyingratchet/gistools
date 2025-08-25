@@ -30,7 +30,7 @@ Must have columns: date_time, decimal_latitude, decimal_longitude. Elevation col
 
 \item{gps_elevation_col}{Name of the elevation column in the GPX data (default: "elevation_in_meters")}
 
-\item{overwrite_latlon_only_if_na}{If TRUE, only fill lat/lon when NA; else overwrite on match (default: FALSE)}
+\item{overwrite_latlon_only_if_na}{If TRUE, only fill decimal_latitude/lon when NA; else overwrite on match (default: FALSE)}
 
 \item{overwrite_elev_only_if_na}{If TRUE, only fill elevation when NA; else overwrite on match (default: FALSE)}
 

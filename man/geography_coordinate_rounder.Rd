@@ -2,7 +2,7 @@
 % Please edit documentation in R/gistools.R
 \name{geography_coordinate_rounder}
 \alias{geography_coordinate_rounder}
-\title{Rounds lat lon values based on sensible precision and manage formats
+\title{Rounds decimal_latitude decimal_longitude values based on sensible precision and manage formats
 based on accuracy information in an coordinate uncertainty field
 in meters}
 \usage{
@@ -12,10 +12,10 @@ geography_coordinate_rounder(df)
 \item{df}{a database in SYMBIOTA format}
 }
 \value{
-a dataframe with rounded lat lon values
+a dataframe with rounded decimal_latitude decimal_longitude values
 }
 \description{
-Rounds lat lon values based on sensible precision and manage formats
+Rounds decimal_latitude decimal_longitude values based on sensible precision and manage formats
 based on accuracy information in an coordinate uncertainty field
 in meters
 }

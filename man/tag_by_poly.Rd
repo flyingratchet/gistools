@@ -8,27 +8,27 @@ fall within a polygon}
 tag_by_poly(
   df,
   poly,
-  lat = "lat",
-  lon = "lon",
+  decimal_latitude = "decimal_latitude",
+  decimal_longitude = "decimal_longitude",
   crs,
   results_col = "results",
   tag
 )
 }
 \arguments{
-\item{df}{a data frame of occurrence records that contains lat and lon columns}
+\item{df}{a data frame of occurrence records that contains lat and decimal_longitude columns}
 
 \item{poly}{a shape files with polygons}
 
-\item{lat}{decimal latitude field from the data from}
-
-\item{lon}{decimal longitude field from the data from}
+\item{decimal_longitude}{decimal longitude field from the data from}
 
 \item{crs}{a projection system}
 
 \item{results_col}{a character string representing the column where you like the label to be stored that indicates selected points}
 
 \item{tag}{a character string with which to label selected points}
+
+\item{lat}{decimal latitude field from the data from}
 }
 \value{
 a data frame with records filtered based on falling inside the focal polygon
