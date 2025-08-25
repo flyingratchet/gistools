@@ -2,7 +2,6 @@
 
 export(convert_dir_to_kml)
 export(extract_coordinates)
-export(extract_coords)
 export(find_elevation)
 export(geography_coordinate_rounder)
 export(munge_gpx)
