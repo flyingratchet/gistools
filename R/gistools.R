@@ -1,6 +1,4 @@
-##### GIS PROCESSES #####
-
-
+# CORE GIS FUNCTIONS ------------------------------------------------------
 
 #' Function which filters coordinates in a data frame based on whether they
 #' fall within a polygon
@@ -460,6 +458,266 @@ round_coords_cc <- function(df){
 }
 
 
+
+
+
+
+# REFACTORED COORDINATE EXTRACTION FROM TIME STAMP PIPELINE ---------------
+
+#' Geoencode records with GPX using per-record UTC offsets
+#'
+#' @param records Data frame with event_date, event_time, decimal_latitude, decimal_longitude, and timezone columns
+#' @param time_coords GPS coordinates with UTC timestamps (data.frame or CSV path).
+#'        Must have columns: date_time, decimal_latitude, decimal_longitude. Elevation column optional.
+#' @param time_zone Column name in `records` containing UTC offsets per record (e.g., "UTC-7", "UTC+5.5")
+#' @param max_gap_mins Maximum gap in minutes between record and nearest GPX point (default: 15)
+#' @param elevation_col Name of the elevation column to write in `records` (default: "elevation_in_meters")
+#' @param gps_elevation_col Name of the elevation column in the GPX data (default: "elevation_in_meters")
+#' @param overwrite_latlon_only_if_na If TRUE, only fill lat/lon when NA; else overwrite on match (default: FALSE)
+#' @param overwrite_elev_only_if_na   If TRUE, only fill elevation when NA; else overwrite on match (default: FALSE)
+#' @param verbose Print progress messages (default: TRUE)
+#' @return `records` with updated decimal_latitude, decimal_longitude, and (optionally) `elevation_col`.
+#'         Adds a helper column `time_diff_mins` indicating match gap (mins).
+#' @export
+extract_coordinates <- function(
+    records,
+    time_coords,
+    time_zone,
+    max_gap_mins = 15,
+    elevation_col = "elevation_in_meters",
+    gps_elevation_col = "elevation_in_meters",
+    overwrite_latlon_only_if_na = FALSE,
+    overwrite_elev_only_if_na   = FALSE,
+    verbose = TRUE
+) {
+  require(dplyr, quietly = TRUE)
+  require(data.table, quietly = TRUE)
+  require(lubridate, quietly = TRUE)
+  require(purrr, quietly = TRUE)
+
+  # --- validate & snapshot types so we can restore later ---------------------
+  stopifnot(is.data.frame(records))
+  req_cols <- c("event_date", "event_time", "decimal_latitude", "decimal_longitude")
+  miss <- setdiff(req_cols, names(records))
+  if (length(miss)) stop("Missing required columns in `records`: ", paste(miss, collapse = ", "))
+
+  if (!time_zone %in% names(records)) {
+    stop(sprintf("Column '%s' not found in records.", time_zone))
+  }
+
+  col_classes <- purrr::map_chr(records, ~ class(.x)[1])
+  orig_cols   <- names(records)
+
+  # Coerce lat/lon to numeric safely (if present as character)
+  records$decimal_latitude  <- as.numeric_safe(records$decimal_latitude)
+  records$decimal_longitude <- as.numeric_safe(records$decimal_longitude)
+
+  # Ensure elevation target column exists (numeric by default)
+  if (!elevation_col %in% names(records)) records[[elevation_col]] <- NA_real_
+
+  # --- parse local datetime + timezone to UTC --------------------------------
+  records$local_datetime <- create_local_datetime(records$event_date, records$event_time)
+
+  # Separate those with usable times
+  with_time <- dplyr::filter(records, !is.na(local_datetime) & !is.na(.data[[time_zone]]))
+  no_time   <- dplyr::filter(records,  is.na(local_datetime) |  is.na(.data[[time_zone]]))
+
+  # Parse per-record time zone offsets (e.g., "UTC-7", "UTC+5.5")
+  tz_info <- check_time_zone_strings(with_time[[time_zone]])
+  if (any(!tz_info$ok)) {
+    bad <- unique(as.character(with_time[[time_zone]][!tz_info$ok]))
+    stop("Invalid timezone format found: ", paste(bad, collapse = ", "),
+         "\nUse 'UTC±N' forms (e.g., 'UTC-7', 'UTC+5', 'UTC+5.5').")
+  }
+  with_time$offset_hours <- tz_info$offset_hours
+  with_time$utc_time     <- with_time$local_datetime - lubridate::dhours(with_time$offset_hours)
+  attr(with_time$utc_time, "tzone") <- "UTC"
+
+  # --- load & normalize GPX ---------------------------------------------------
+  gps_dt <- load_gps_data(time_coords, gps_elevation_col = gps_elevation_col) # adds gpx_elev
+
+  # --- nearest-time match (rolling join) -------------------------------------
+  rec_dt <- as.data.table(with_time)[, rec_idx := .I]
+  matched <- gps_dt[rec_dt, on = .(date_time = utc_time), roll = "nearest",
+                    .(
+                      rec_idx        = i.rec_idx,
+                      time_diff_mins = abs(as.numeric(difftime(x.date_time, i.utc_time, units = "mins"))),
+                      gpx_lat        = x.decimal_latitude,
+                      gpx_lon        = x.decimal_longitude,
+                      gpx_elev       = x.gpx_elev
+                    )
+  ]
+
+  within_gap <- matched$time_diff_mins <= max_gap_mins & !is.na(matched$time_diff_mins)
+
+  # --- apply updates ----------------------------------------------------------
+  updated_with_time <- update_from_matches(
+    with_time, matched, within_gap, elevation_col,
+    overwrite_latlon_only_if_na = overwrite_latlon_only_if_na,
+    overwrite_elev_only_if_na   = overwrite_elev_only_if_na
+  )
+
+  # Recombine with no-time rows
+  out <- dplyr::bind_rows(updated_with_time, no_time) %>%
+    dplyr::arrange(event_date, event_time)
+
+  # Restore original column classes for original columns only
+  out <- recoerce_columns(out, col_classes)
+
+  if (verbose) {
+    cat("\n", sum(within_gap, na.rm = TRUE), " records updated (≤", max_gap_mins, " mins).\n", sep = "")
+    n_unmatched <- nrow(with_time) - sum(within_gap, na.rm = TRUE)
+    if (n_unmatched > 0) cat(n_unmatched, " records were unmatched and not updated\n", sep = "")
+    if (nrow(no_time) > 0) cat("SKIPPED (no usable time): ", nrow(no_time), "\n", sep = "")
+  }
+
+  # Keep original cols plus updated fields + time_diff_mins if present
+  keep <- unique(c(orig_cols, "decimal_latitude", "decimal_longitude", elevation_col, "time_diff_mins"))
+  keep <- intersect(keep, names(out))
+  dplyr::select(out, dplyr::all_of(keep))
+}
+
+
+
+as.numeric_safe <- function(x) {
+  suppressWarnings(as.numeric(ifelse(is.na(x) | x == "", NA, x)))
+}
+
+create_local_datetime <- function(date_col, time_col) {
+  datetime_str <- paste(date_col, time_col)
+  # Try with seconds (YYYY-mm-dd HH:MM:SS)
+  local_dt <- as.POSIXct(datetime_str, format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+  # Fallback to minutes (YYYY-mm-dd HH:MM)
+  need_min <- is.na(local_dt) & !is.na(time_col)
+  if (any(need_min)) {
+    local_dt[need_min] <- as.POSIXct(datetime_str[need_min], format = "%Y-%m-%d %H:%M", tz = "UTC")
+  }
+  local_dt
+}
+
+check_time_zone_strings <- function(x) {
+  # Accepts "UTC±N" or "UTC±N.N" (e.g., "UTC-7", "UTC+5.5")
+  pat <- "^UTC([+-])(\\d+(?:\\.\\d+)?)$"
+  ok  <- grepl(pat, x)
+  offsets <- rep(NA_real_, length(x))
+  if (any(ok)) {
+    sign <- ifelse(sub(pat, "\\1", x[ok]) == "+", 1, -1)
+    hrs  <- as.numeric(sub(pat, "\\2", x[ok]))
+    offsets[ok] <- sign * hrs
+  }
+  list(ok = ok, offset_hours = offsets)
+}
+
+load_gps_data <- function(time_coords, gps_elevation_col = "elevation_in_meters") {
+  if (is.character(time_coords) && file.exists(time_coords)) {
+    time_coords <- read.csv(time_coords, stringsAsFactors = FALSE)
+  }
+
+  required_cols <- c("date_time", "decimal_latitude", "decimal_longitude")
+  missing_cols <- setdiff(required_cols, names(time_coords))
+  if (length(missing_cols) > 0) {
+    stop("Missing required columns in time_coords: ", paste(missing_cols, collapse = ", "))
+  }
+
+  gps_dt <- as.data.table(time_coords)
+  gps_dt[, `:=`(
+    decimal_latitude  = as.numeric(decimal_latitude),
+    decimal_longitude = as.numeric(decimal_longitude),
+    date_time         = parse_utc_datetime(date_time)
+  )]
+
+  # Normalize elevation column to gpx_elev for reliable use in data.table joins
+  if (gps_elevation_col %in% names(gps_dt)) {
+    gps_dt[, gpx_elev := suppressWarnings(as.numeric(get(gps_elevation_col)))]
+  } else {
+    gps_dt[, gpx_elev := NA_real_]
+  }
+
+  setkey(gps_dt, date_time)
+  gps_dt
+}
+
+parse_utc_datetime <- function(datetime_col) {
+  if (inherits(datetime_col, "POSIXct")) return(lubridate::with_tz(datetime_col, "UTC"))
+  parsed <- lubridate::ymd_hms(as.character(datetime_col), tz = "UTC", quiet = TRUE)
+  if (any(is.na(parsed))) {
+    parsed2 <- as.POSIXct(as.character(datetime_col), format = "%Y-%m-%d %H:%M", tz = "UTC")
+    parsed[is.na(parsed)] <- parsed2[is.na(parsed)]
+  }
+  parsed
+}
+
+update_from_matches <- function(records_with_time, matched, within_gap, elevation_col,
+                                overwrite_latlon_only_if_na = FALSE,
+                                overwrite_elev_only_if_na   = FALSE) {
+  if (!"time_diff_mins" %in% names(records_with_time)) records_with_time$time_diff_mins <- NA_real_
+
+  idx <- matched$rec_idx[within_gap]
+  if (length(idx) == 0) return(records_with_time)
+
+  # Map the matched vectors to the TRUEs in within_gap
+  lat_new  <- matched$gpx_lat [within_gap]
+  lon_new  <- matched$gpx_lon [within_gap]
+  elev_new <- matched$gpx_elev[within_gap]
+  gap_new  <- matched$time_diff_mins[within_gap]
+
+  # LAT
+  if (overwrite_latlon_only_if_na) {
+    write_lat <- is.na(records_with_time$decimal_latitude[idx])
+  } else {
+    write_lat <- rep(TRUE, length(idx))
+  }
+  records_with_time$decimal_latitude[idx[write_lat]] <- lat_new[write_lat]
+
+  # LON
+  if (overwrite_latlon_only_if_na) {
+    write_lon <- is.na(records_with_time$decimal_longitude[idx])
+  } else {
+    write_lon <- rep(TRUE, length(idx))
+  }
+  records_with_time$decimal_longitude[idx[write_lon]] <- lon_new[write_lon]
+
+  # ELEVATION
+  if (overwrite_elev_only_if_na) {
+    write_elev <- is.na(records_with_time[[elevation_col]][idx])
+  } else {
+    write_elev <- rep(TRUE, length(idx))
+  }
+  # If elevation column is character, keep type; else numeric
+  if (is.character(records_with_time[[elevation_col]])) {
+    records_with_time[[elevation_col]][idx[write_elev]] <- as.character(elev_new[write_elev])
+  } else {
+    records_with_time[[elevation_col]][idx[write_elev]] <- suppressWarnings(as.numeric(elev_new[write_elev]))
+  }
+
+  # Bookkeeping
+  records_with_time$time_diff_mins[idx] <- gap_new
+  records_with_time
+}
+
+recoerce_columns <- function(df, ref_classes) {
+  for (col in intersect(names(df), names(ref_classes))) {
+    df[[col]] <- switch(
+      ref_classes[[col]],
+      character = as.character(df[[col]]),
+      numeric   = as.numeric(df[[col]]),
+      double    = as.double(df[[col]]),
+      integer   = as.integer(df[[col]]),
+      factor    = as.factor(df[[col]]),
+      df[[col]]  # fallback/no-op
+    )
+  }
+  df
+}
+
+
+
+
+
+
+
+
+
 # NEW REFACTORED GPX AND KML PIPELINE -------------------------------------
 
 
@@ -861,3 +1119,18 @@ create_combined_kml <- function(output_dir) {
     writeLines(master_kml, output_file)
     message("📦 Master KML created: ", output_file)
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
