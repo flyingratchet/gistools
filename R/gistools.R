@@ -807,46 +807,46 @@ find_gpx_files <- function(folder) {
 
 #' Extract and process trackpoint data from GPX file
 #' @param gpx_file Path to GPX file
-#' @return List with decimal_latitude, lon, time_utc, time_local, local_tz
+#' @return List with lat, lon, time_utc, time_local, local_tz
 extract_trackpoint_data <- function(gpx_file) {
-    xml <- read_xml(gpx_file)
-    xml_clean <- xml_ns_strip(xml)
-    trkpts <- xml_find_all(xml_clean, ".//trkpt | .//wpt | .//rtept")
+  xml <- read_xml(gpx_file)
+  xml_clean <- xml_ns_strip(xml)
+  trkpts <- xml_find_all(xml_clean, ".//trkpt | .//wpt | .//rtept")
 
-    if (length(trkpts) == 0) {
-        message("⚠️ No trackpoints found in: ", gpx_file)
-        return(NULL)
-    }
+  if (length(trkpts) == 0) {
+    message("⚠️ No trackpoints found in: ", gpx_file)
+    return(NULL)
+  }
 
-    # Extract coordinates and time
-    decimal_latitude <- xml_attr(trkpts, "decimal_latitude")
-    decimal_longitude <- xml_attr(trkpts, "decimal_longitude")
-    time_raw <- map_chr(trkpts, ~ xml_text(xml_find_first(.x, "time")))
-    time_parsed <- suppressWarnings(as.POSIXct(time_raw, format = "%Y-%m-%dT%H:%M:%OSZ", tz = "UTC"))
+  # Extract coordinates and time - FIXED: use "lat" and "lon" instead of "decimal_latitude" and "decimal_longitude"
+  lat <- xml_attr(trkpts, "lat")
+  lon <- xml_attr(trkpts, "lon")
+  time_raw <- map_chr(trkpts, ~ xml_text(xml_find_first(.x, "time")))
+  time_parsed <- suppressWarnings(as.POSIXct(time_raw, format = "%Y-%m-%dT%H:%M:%OSZ", tz = "UTC"))
 
-    # Filter valid data
-    valid_idx <- which(!is.na(decimal_latitude) & !is.na(decimal_longitude) & !is.na(time_parsed))
-    if (length(valid_idx) == 0) {
-        message("⚠️ No valid data in: ", gpx_file)
-        return(NULL)
-    }
+  # Filter valid data
+  valid_idx <- which(!is.na(lat) & !is.na(lon) & !is.na(time_parsed))
+  if (length(valid_idx) == 0) {
+    message("⚠️ No valid data in: ", gpx_file)
+    return(NULL)
+  }
 
-    decimal_latitude <- decimal_latitude[valid_idx]
-    decimal_longitude <- decimal_longitude[valid_idx]
-    time_utc <- time_parsed[valid_idx]
+  lat <- lat[valid_idx]
+  lon <- lon[valid_idx]
+  time_utc <- time_parsed[valid_idx]
 
-    # Detect and convert to local timezone
-    local_tz <- detect_timezone(decimal_latitude, decimal_longitude)
-    time_local <- as.POSIXct(time_utc, tz = "UTC")
-    attr(time_local, "tzone") <- local_tz
+  # Detect and convert to local timezone
+  local_tz <- detect_timezone(lat, lon)
+  time_local <- as.POSIXct(time_utc, tz = "UTC")
+  attr(time_local, "tzone") <- local_tz
 
-    list(
-        decimal_latitude = decimal_latitude,
-        decimal_longitude = decimal_longitude,
-        time_utc = time_utc,
-        time_local = time_local,
-        local_tz = local_tz
-    )
+  list(
+    lat = lat,  # FIXED: changed from decimal_latitude to lat
+    lon = lon,  # FIXED: changed from decimal_longitude to lon
+    time_utc = time_utc,
+    time_local = time_local,
+    local_tz = local_tz
+  )
 }
 
 #' Detect timezone from GPS coordinates
