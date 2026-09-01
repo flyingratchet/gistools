@@ -359,69 +359,10 @@ geography_coordinate_rounder <- function(df){
 }
 
 
-#' DEPRACATED
-#' Rounds decimal_latitude decimal_longitude values based on sensible precision and manage formats
-#' based on accuracy information in an coordinate uncertainty field
-#' in meters
-#' @param df a database in SYMBIOTA format
-#' @return a dataframe with rounded decimal_latitude decimal_longitude values
-#' @export
-round_coords_cc <- function(df){
-    # Make sure decimal_latitude/decimal_longitude associated columns are numeric
-    df$decimal_latitude <- as.numeric(df$decimal_latitude)
-    df$decimal_longitude <- as.numeric(df$decimal_longitude)
-    df$coordinate_uncertainty <- as.numeric(df$coordinate_uncertainty)
-
-    # Temporarily remove records with "NA" or no numbers in the coordinate_uncertainty field so they don't get processed
-    dfnoNumUncertainty <- df[grepl("^([^0-9]*)$", df$coordinate_uncertainty, perl = TRUE),]
-    dfNAUncertainty <- df[is.na(df$coordinate_uncertainty),]
-    df <- df[grepl("\\d", df$coordinate_uncertainty, perl = TRUE),]
-    # remove records without coords temporarily
-    dfNoCoords <- df %>% filter(is.na(decimal_latitude))
-    dfCoords <- df %>% filter(!is.na(decimal_latitude))
-
-    # ROUND decimal_latitude/decimal_longitude TO APPROPRIATE VALUES BASED ON ACCURACY
-    dfCoords['roundNum'] <- NA
-    dfCoords$roundNum[dfCoords$coordinate_uncertainty >= 1000] <- 2
-    dfCoords$roundNum[dfCoords$coordinate_uncertainty >= 100 & dfCoords$coordinate_uncertainty < 1000] <- 3
-    dfCoords$roundNum[dfCoords$coordinate_uncertainty >= 10 & dfCoords$coordinate_uncertainty < 100] <- 4
-    dfCoords$roundNum[dfCoords$coordinate_uncertainty < 10] <- 5
-    dfCoords$roundNum <- as.numeric(dfCoords$roundNum)
-
-    # Overwrite rounded decimal_latitude/decimal_longitude results with original values
-    results <- NA
-    for(i in 1:nrow(dfCoords)){
-        results[[i]] <- formatC(dfCoords$decimal_latitude[i], dfCoords$roundNum[i], format = "f")
-    }
-    dfCoords$decimal_latitude <- results
-
-    results <- NA
-    for(i in 1:nrow(dfCoords)){
-        results[[i]] <- formatC(dfCoords$decimal_longitude[i], dfCoords$roundNum[i], format = "f")
-    }
-    dfCoords$decimal_longitude <- results
-
-    # Delete columns that aren't needed
-    dfCoords$roundNum <- NULL
-    dfCoords$decimal_latitude <- as.numeric(dfCoords$decimal_latitude)
-    dfCoords$decimal_longitude <- as.numeric(dfCoords$decimal_longitude)
-
-    # Add back records that were removed pre-processing above and then re-sort database
-    df <- bind_rows(dfCoords, dfNoCoords, dfNAUncertainty, dfnoNumUncertainty)
-
-    # Format as character values so no funny business happens to decimal_latitude/decimal_longitude
-    df$decimal_latitude <- as.character(df$decimal_latitude)
-    df$decimal_longitude <- as.character(df$decimal_longitude)
-
-    # Sort whatever column is necessary before returning output since I cut and pasted the df so much
-    if("SpecimenCode" %in% colnames(df)){
-        df <- df[with(df, order(SpecimenCode)),] # sort cc.new;
-    } else{ if("CollectionCode" %in% colnames(df)){
-        df <- df[with(df, order(CollectionCode)),] # sort cc.new
-    }
-    }
-    return(df)
-}
+### round_coords_cc() removed — tagged DEPRACATED, superseded by
+### geography_coordinate_rounder() above (00f_extract_photo_metadata.R was
+### switched over earlier this session). Zero callers confirmed in this
+### project and in hopperwiki_compiler before deletion.
 
 
 
