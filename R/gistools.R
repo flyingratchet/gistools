@@ -322,20 +322,16 @@ geography_coordinate_rounder <- function(df){
             )
         )
 
-    # Round decimal_latitude/decimal_longitude values and format them to preserve trailing zeros
-    df_valid <- df_valid %>%
-        rowwise() %>%
-        mutate(
-            decimal_latitude = formatC(round(decimal_latitude, roundNum), format = "f", digits = roundNum),
-            decimal_longitude = formatC(round(decimal_longitude, roundNum), format = "f", digits = roundNum)
-        ) %>%
-        ungroup()
-
-    # Convert decimal_latitude/decimal_longitude to character to ensure consistency
+    # Round decimal_latitude/decimal_longitude values and format them to preserve trailing zeros.
+    # formatC()'s `digits` argument doesn't accept a vector (errors when roundNum varies by
+    # row), which is why this used rowwise() — sprintf()'s "%.<n>f" recycles correctly per
+    # row instead, and already returns character, so the old separate as.character() step
+    # right after this (which did nothing, since formatC() also already returned character)
+    # is gone too.
     df_valid <- df_valid %>%
         mutate(
-            decimal_latitude = as.character(decimal_latitude),
-            decimal_longitude = as.character(decimal_longitude)
+            decimal_latitude = sprintf(paste0("%.", roundNum, "f"), round(decimal_latitude, roundNum)),
+            decimal_longitude = sprintf(paste0("%.", roundNum, "f"), round(decimal_longitude, roundNum))
         )
 
     # Ensure df_no_coords decimal_latitude/decimal_longitude are also characters
