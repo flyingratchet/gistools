@@ -15,7 +15,7 @@ tag_by_poly <- function(df, poly, decimal_latitude = "decimal_latitude", decimal
 
 
     df_no_coords <- df %>% filter(is.na(decimal_latitude) | is.na(decimal_longitude))
-    df %<>% filter(!is.na(decimal_latitude) | !is.na(decimal_longitude))
+    df %<>% filter(!is.na(decimal_latitude) & !is.na(decimal_longitude))
 
     # convert data frame to simple feature (sf) format
     df_points <- df %>% sf::st_as_sf(coords = c(x = {{decimal_longitude}}, y = {{decimal_latitude}}), crs = crs)
@@ -57,7 +57,8 @@ tag_by_poly <- function(df, poly, decimal_latitude = "decimal_latitude", decimal
 #' @return A tibble with columns named per `out_*`. Elevation may be `NA`.
 #' @export
 build_coordinate_table <- function(
-    path,
+    path            = NULL,
+    files           = NULL,
     glob            = "*.gpx",
     lat_attr        = "lat",
     lon_attr        = "lon",
@@ -67,6 +68,7 @@ build_coordinate_table <- function(
     out_lon         = "decimal_longitude",
     out_ele         = "elevation_in_meters",
     out_time        = "date_time",
+    out_source_file = "source_file",
     tz              = "UTC",
     quiet           = TRUE,
     latlon_digits   = 6,
@@ -80,13 +82,21 @@ build_coordinate_table <- function(
   requireNamespace("rlang", quietly = TRUE)
   requireNamespace("lubridate", quietly = TRUE)
 
-  files <- fs::dir_ls(path, recurse = TRUE, glob = glob)
+  # `files` lets a caller parse a specific subset of .gpx files directly,
+  # skipping directory discovery — the caller (e.g. an incremental-update
+  # loop) is responsible for knowing which files it wants. Default behavior
+  # (pass `path`, discover everything under it) is unchanged.
+  if (is.null(files)) {
+    if (is.null(path)) stop("build_coordinate_table(): provide either `path` or `files`.")
+    files <- fs::dir_ls(path, recurse = TRUE, glob = glob)
+  }
 
   empty_out <- tibble::tibble(
-    !!out_lat  := vector("double"),
-    !!out_lon  := vector("double"),
-    !!out_ele  := vector("double"),
-    !!out_time := as.POSIXct(character())
+    !!out_lat         := vector("double"),
+    !!out_lon         := vector("double"),
+    !!out_ele         := vector("double"),
+    !!out_time        := as.POSIXct(character()),
+    !!out_source_file := vector("character")
   )
   if (length(files) == 0L) return(empty_out)
 
@@ -118,7 +128,11 @@ build_coordinate_table <- function(
   }
 
   dat <- files %>%
-    purrr::map(parse_one_file) %>%
+    purrr::map(function(f) {
+      out <- parse_one_file(f)
+      if (!is.null(out) && nrow(out) > 0) out$.source_file <- as.character(f)
+      out
+    }) %>%
     purrr::compact() %>%
     dplyr::bind_rows()
 
@@ -139,10 +153,11 @@ build_coordinate_table <- function(
         sprintf(paste0("%.", latlon_digits, "f"), .lon) else .lon
     ) %>%
     dplyr::rename(
-      !!out_lat  := .lat,
-      !!out_lon  := .lon,
-      !!out_ele  := .ele,
-      !!out_time := .time
+      !!out_lat         := .lat,
+      !!out_lon         := .lon,
+      !!out_ele         := .ele,
+      !!out_time        := .time,
+      !!out_source_file := .source_file
     ) %>%
     dplyr::arrange(!!rlang::sym(out_time))
 }
